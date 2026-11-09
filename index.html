@@ -2,6 +2,7 @@
 <title>Go Dutch</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
 :root {
@@ -1339,7 +1340,6 @@ function esc(s) {
 }
 
 // --- Scan Receipt ---
-const GEMINI_API_KEY = 'AQ.Ab8RN6IiSqKgtae8qFKwHPyh_n1GkRxFhi2BHtS9vzzdezoaiA';
 let scannedItems = [];
 
 function triggerScan() {
@@ -1370,87 +1370,106 @@ function handleScanFile(event) {
   const file = event.target.files[0];
   if (!file) return;
 
-  // Show preview
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = document.getElementById('scan-preview');
     img.src = e.target.result;
     document.getElementById('scan-preview-wrap').hidden = false;
-    // Kick off Gemini call
-    callGeminiOCR(e.target.result.split(',')[1], file.type);
+    runTesseractOCR(e.target.result);
   };
   reader.readAsDataURL(file);
 }
 
-async function callGeminiOCR(base64Data, mimeType) {
+async function runTesseractOCR(dataUrl) {
   const statusEl = document.getElementById('scan-status');
   statusEl.className = 'scan-status loading';
-  statusEl.innerHTML = '<div class="spinner"></div> Reading receipt…';
-
-  const prompt = `You are a receipt parser. Extract all line items and their prices from this receipt image.
-Also detect: the currency used, any tax percentage or amount, any service charge percentage or amount.
-
-Return ONLY valid JSON in this exact format, nothing else:
-{
-  "currency": "IDR",
-  "items": [
-    {"name": "Item name", "price": 25000}
-  ],
-  "tax_pct": 11,
-  "tax_fixed": 0,
-  "service_pct": 0,
-  "service_fixed": 0
-}
-
-Rules:
-- currency: 3-letter code like IDR, JPY, USD, SGD, MYR, THB, EUR, GBP
-- prices: numbers only, no currency symbols
-- tax_pct: percentage value (e.g. 11 for 11%), 0 if none
-- tax_fixed: fixed amount if tax is not percentage, 0 otherwise
-- service_pct: percentage value, 0 if none
-- service_fixed: fixed amount if service is not percentage, 0 otherwise
-- Skip subtotal, total, and grand total lines — only individual items`;
+  statusEl.innerHTML = '<div class="spinner"></div> Reading receipt… (this takes ~10s)';
 
   try {
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-goog-api-key': GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data: base64Data } }
-            ]
-          }],
-          generationConfig: { temperature: 0, maxOutputTokens: 1024 }
-        })
+    const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng+ind', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = Math.round((m.progress || 0) * 100);
+          statusEl.innerHTML = `<div class="spinner"></div> Reading receipt… ${pct}%`;
+        }
       }
-    );
+    });
 
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error?.message || 'API error');
-    }
-
-    const data = await res.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-    // Extract JSON from response
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('Could not parse receipt');
-    const parsed = JSON.parse(jsonMatch[0]);
-
+    const parsed = parseReceiptText(text);
     showScanResults(parsed);
   } catch (err) {
     statusEl.className = 'scan-status error';
-    statusEl.textContent = '⚠️ ' + (err.message || 'Failed to read receipt. Try a clearer photo.');
+    statusEl.textContent = '⚠️ Failed to read receipt. Try a clearer photo.';
     document.getElementById('scan-choose-btn').textContent = '📷 Try again';
   }
+}
+
+function parseReceiptText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // Detect currency
+  let currency = 'IDR';
+  const fullText = text.toUpperCase();
+  if (fullText.includes('RP') || fullText.includes('IDR') || fullText.includes('RUPIAH')) currency = 'IDR';
+  else if (fullText.includes('USD') || fullText.includes('US$') || fullText.match(/\$\s*\d/)) currency = 'USD';
+  else if (fullText.includes('SGD') || fullText.includes('S$')) currency = 'SGD';
+  else if (fullText.includes('MYR') || fullText.includes('RM')) currency = 'MYR';
+  else if (fullText.includes('JPY') || fullText.includes('¥') || fullText.includes('YEN')) currency = 'JPY';
+  else if (fullText.includes('THB') || fullText.includes('BAHT') || fullText.includes('฿')) currency = 'THB';
+  else if (fullText.includes('EUR') || fullText.includes('€')) currency = 'EUR';
+  else if (fullText.includes('GBP') || fullText.includes('£')) currency = 'GBP';
+  else if (fullText.includes('AUD') || fullText.includes('A$')) currency = 'AUD';
+
+  // Skip lines that are totals/headers/noise
+  const skipWords = /subtotal|sub.total|total|grand|tax|pajak|ppn|service|servis|charge|discount|diskon|tip|change|kembalian|cash|tunai|card|kartu|receipt|struk|nota|bill|invoice|thank|terima|kasih|item|qty|quantity|harga|price/i;
+  const isLikelyTotal = /\b(sub)?total\b|\bgrand\b|\btax\b|\bservice\b|\bdiscount\b/i;
+
+  // Detect tax & service
+  let tax_pct = 0, service_pct = 0;
+  lines.forEach(line => {
+    const taxMatch = line.match(/(?:tax|ppn|pajak)[^\d]*(\d+(?:[.,]\d+)?)\s*%/i);
+    if (taxMatch) tax_pct = parseFloat(taxMatch[1]);
+    const svcMatch = line.match(/(?:service|servis)[^\d]*(\d+(?:[.,]\d+)?)\s*%/i);
+    if (svcMatch) service_pct = parseFloat(svcMatch[1]);
+  });
+
+  // Extract items — lines with a name and a number at the end
+  const items = [];
+  // Price pattern: number possibly with dots/commas as thousand separators
+  const pricePattern = /(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?|\d+)\s*$/;
+
+  lines.forEach(line => {
+    if (isLikelyTotal.test(line)) return;
+    if (skipWords.test(line)) return;
+    if (line.length < 3) return;
+
+    const match = line.match(pricePattern);
+    if (!match) return;
+
+    // Parse price — remove thousand separators
+    let priceStr = match[1].replace(/\./g, '').replace(',', '.');
+    // If IDR or JPY, likely no decimals — treat comma/dot as thousand sep
+    if (currency === 'IDR' || currency === 'JPY') {
+      priceStr = match[1].replace(/[.,]/g, '');
+    }
+    const price = parseFloat(priceStr);
+    if (!price || price <= 0) return;
+
+    // Name is everything before the price
+    let name = line.slice(0, match.index).trim();
+    // Remove leading qty like "1x", "2 x", "1 "
+    name = name.replace(/^\d+\s*[xX×]?\s*/, '').trim();
+    // Clean up OCR noise
+    name = name.replace(/[|_]{2,}/g, '').trim();
+    if (name.length < 2) return;
+
+    // Skip if price looks like a phone number or year
+    if (priceStr.length > 10) return;
+
+    items.push({ name, price });
+  });
+
+  return { currency, items, tax_pct, tax_fixed: 0, service_pct, service_fixed: 0 };
 }
 
 function showScanResults(parsed) {

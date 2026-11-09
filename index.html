@@ -1339,7 +1339,7 @@ function esc(s) {
 }
 
 // --- Scan Receipt ---
-const GEMINI__KEY = 'AQ.Ab8RN6JkUQr3JhMpOxcHdookppPgR63dgf3xSTJwktOgnG-D6A';
+const GEMINI_API_KEY = 'AQ.Ab8RN6JkUQr3JhMpOxcHdookppPgR63dgf3xSTJwktOgnG-D6A';
 let scannedItems = [];
 
 function triggerScan() {
@@ -1413,7 +1413,7 @@ Rules:
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

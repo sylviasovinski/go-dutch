@@ -1444,9 +1444,12 @@ STRICT RULES — follow exactly:
 7. If you cannot read the receipt clearly, return {"currency":"IDR","items":[],"tax_pct":0,"service_pct":0}`;
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+      },
       body: JSON.stringify({
         contents: [{
           parts: [

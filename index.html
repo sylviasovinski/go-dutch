@@ -963,7 +963,16 @@ function onItemNameChange(id, val) {
 function onItemPriceChange(id, val) {
   const item = state.items.find(i => i.id === id);
   if (item) { item.price = parseFloat(val) || 0; }
-  renderAllItems();
+  // Don't re-render items (would reset focus) — just update IDR equiv label if visible
+  const cur = document.getElementById('bill-currency').value;
+  const rate = getRate();
+  if (cur !== 'IDR' && rate > 0) {
+    const card = document.querySelector(`[data-item-id="${id}"]`);
+    if (card) {
+      const equiv = card.querySelector('.item-idr-equiv');
+      if (equiv) equiv.textContent = '≈ ' + fmtIDR(item.price * rate);
+    }
+  }
   recalc();
 }
 
@@ -980,6 +989,7 @@ function renderAllItems() {
   state.items.forEach(item => {
     const div = document.createElement('div');
     div.className = 'item-card';
+    div.dataset.itemId = item.id;
 
     const idrEquiv = cur !== 'IDR' && rate > 0
       ? `<div class="item-idr-equiv">≈ ${fmtIDR(item.price * rate)}</div>` : '';

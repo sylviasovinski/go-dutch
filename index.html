@@ -1489,28 +1489,38 @@ async function callGeminiVision(dataUrl) {
   const base64 = dataUrl.split(',')[1];
   const mimeType = dataUrl.match(/data:(.*?);/)?.[1] || 'image/jpeg';
 
-  const prompt = `You are a receipt parser. Extract all line items from this receipt image.
+  const prompt = `You are a receipt parser for a bill-splitting app. Extract ONLY the purchased items from this receipt.
 
-Return ONLY valid JSON, no markdown, no code fences. Use this exact format:
-{
-  "currency": "IDR",
-  "items": [
-    {"name": "Item name", "price": 25000}
-  ],
-  "tax_pct": 11,
-  "service_pct": 5
-}
+Return ONLY valid JSON. No markdown, no code fences, no explanation. Exact format:
+{"currency":"IDR","items":[{"name":"Item name","price":25000}],"tax_pct":0,"service_pct":0}
 
-Rules:
-- "currency": detect from receipt (IDR, JPY, USD, SGD, MYR, THB, EUR, GBP, KRW, CNY, AUD, TWD, HKD, PHP, VND). Default IDR.
-- "items": each line item with its name cleaned up and numeric price. If qty > 1, multiply to get total price for that line.
-- Do NOT include subtotal, total, tax, service, discount, or payment lines as items.
-- "tax_pct": tax percentage if shown (0 if none). If tax is a fixed amount, use "tax_fixed" instead.
-- "service_pct": service charge percentage if shown (0 if none). If service is a fixed amount, use "service_fixed" instead.
-- Prices must be numbers, not strings. No thousand separators.`;
+STRICT RULES — follow exactly:
+
+1. ITEMS = only products/food/drinks that were purchased. Each item needs a human-readable name and the TOTAL price paid for that line (qty × unit price).
+
+2. EXCLUDE all of these — they are NOT items:
+   - Subtotal, total, grand total, nett, gross
+   - Tax, PPN, pajak, PB1, VAT
+   - Service, servis, service charge
+   - Discount, diskon, promo, hemat, potongan
+   - Payment: tunai, cash, card, debit, kredit, QRIS, GoPay, OVO, Dana, ShopeePay
+   - Change: kembali, kembalian
+   - Savings: anda hemat, anda menghemat, you save
+   - Header/footer: terima kasih, thank you, selamat, welcome, layanan konsumen, customer service, call center, phone numbers, addresses, dates, receipt numbers, cashier names, member info
+   - Any line that is clearly not a product
+
+3. Clean up item names: fix OCR typos if obvious, capitalize properly, remove codes/SKUs if the real name is also present.
+
+4. Currency: detect from the receipt. Default IDR. Options: IDR, JPY, USD, SGD, MYR, THB, EUR, GBP, KRW, CNY, AUD, TWD, HKD, PHP, VND.
+
+5. Tax/service: extract percentage if shown on receipt. If it's a fixed amount, use "tax_fixed" or "service_fixed" instead. Use 0 if not shown.
+
+6. Prices must be plain numbers with no separators. Example: 35000 not "35,000" or "35.000".
+
+7. If you cannot read the receipt clearly, return {"currency":"IDR","items":[],"tax_pct":0,"service_pct":0}`;
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

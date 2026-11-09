@@ -884,6 +884,10 @@ function onCurrencyChange() {
   // Update placeholder to realistic rate for selected currency
   const placeholders = { JPY:'115', USD:'15800', SGD:'11800', MYR:'3400', THB:'440', EUR:'17200', GBP:'20000', KRW:'11', CNY:'2200', AUD:'10200', TWD:'490', HKD:'2020', PHP:'275', VND:'0.62' };
   document.getElementById('kurs-beli-input').placeholder = placeholders[cur] || '10000';
+  // Auto-set tax: 11% for IDR, 0 for other currencies
+  document.getElementById('tax-input').value = isIDR ? 11 : 0;
+  taxMode = 'pct';
+  updateTaxTrigger();
   state.items.forEach(item => { item.currency = cur; });
   renderAllItems();
   recalc();
